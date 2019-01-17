@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: hydra
+metadata:
+  name: hydra
+  annotations:
+    description: "Hydra Authorization Server"
+    tags: "hydra,oauth"
+objects:
+- apiVersion: apps.openshift.io/v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    replicas: 1
+    revisionHistoryLimit: 10
+    selector:
+      app: ${SERVICE_NAME}
+      deploymentconfig: ${SERVICE_NAME}
+    template:
+      metadata:
+        labels:
+          app: ${SERVICE_NAME}
+          deploymentconfig: ${SERVICE_NAME}
+      spec:
+        containers:
+        - args:
+          - serve
+          - all
+          - "--dangerous-force-http"
+          env:
+          - name: DATABASE_URL
+            value: memory        
+          image: oryd/hydra:${HYDRA_IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          name: hydra  
+        - env:
+          - name: OATHKEEPER_PROXY_URL
+            value: ${HYDRA_PUBLIC_URL}
+          - name: CREDENTIALS_ISSUER_ID_TOKEN_HS256_SECRET
+            value: ${SECRET}       
+          image: outtherelabs/hydra-oathkeeper-sidecar:${OATHKEEPER_IMAGE_TAG}
+          imagePullPolicy: Always
+          name: oathkeeper-api                               
+          ports:
+          - containerPort: 4445
+            name: http
+            protocol: TCP             
+    triggers:
+    - type: ConfigChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    ports:
+    - name: http
+      port: 4444
+      protocol: TCP
+      targetPort: 4444
+    selector:
+      app: ${SERVICE_NAME}
+      deploymentconfig: ${SERVICE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+parameters:
+- description: The public URL that Hydra will live on
+  displayName: Public URL
+  name: HYDRA_PUBLIC_URL
+  required: true
+- description: The name of this hydra service
+  displayName: Service Name
+  name: SERVICE_NAME
+  required: true
+  value: hydra
+- description: The oath keeper secret
+  displayName: Oath Keeper Secret
+  name: SECRET
+  required: true
+  value: arandomsecretarandomsecretarando
+- description: The image tag for this version of Hydra
+  displayName: Hydra Image Tag
+  name: HYDRA_IMAGE_TAG
+  required: true
+  value: v1.0.0-rc.6_oryOS.10
+- description: The image tag for this version of Oath Keeper
+  displayName: Oathkeeper Image Tag
+  name: OATHKEEPER_IMAGE_TAG
+  required: true
+  value: v0.14.2_oryOS.10

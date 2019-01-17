@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -euo pipefail
+
+function envsubstfiles {
+    usepath=$1
+    echo "Running envsubst in path $usepath"
+    for filename in $usepath; do
+        echo "Substituting environment variables in file $filename"
+        (set -x; envsubst < ${filename} > ${filename}.env)
+        (set -x; rm ${filename})
+        (set -x; mv ${filename}.env ${filename})
+    done
+}
+
+echo "Starting API"
+PORT=4456 oathkeeper serve api &
+OATHKEEPER_API_PID="$!"
+
+echo 'Waiting for API'
+until $(curl --output /dev/null --silent --fail --header 'Accept: application/json' http://127.0.0.1:4456/health/alive); do
+    printf '.'
+    sleep 1
+done
+echo ""
+
+RULE_PATH="$(mktemp -d)"
+echo "Importing oathkeeper rules from $RULE_PATH/*.json..."
+cp /etc/oathkeeper-sidecar/rules/*.json $RULE_PATH
+envsubstfiles "${RULE_PATH}/*.json"
+for RULE_FILE in $(find ${RULE_PATH}/*.json 2> /dev/null); do
+    (set -x; oathkeeper rules import --endpoint http://127.0.0.1:4456 ${RULE_FILE})
+done
+echo "\n"
+
+echo "Starting Proxy"
+PORT=4455 oathkeeper serve proxy &
+OATHKEEPER_PROXY_PID="$!"
+
+echo 'Started!'
+
+trap "kill $OATHKEEPER_API_PID $OATHKEEPER_PROXY_PID" exit INT TERM
+
+# While copy is running...
+while kill -0 $OATHKEEPER_API_PID 2> /dev/null && kill -0 $OATHKEEPER_PROXY_PID 2> /dev/null; do
+    sleep 1
+done
+
+trap - EXIT
